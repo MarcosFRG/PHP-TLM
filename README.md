@@ -6,7 +6,7 @@
 
 - ✅ **Entrenamiento en texto libre** o en formato de **pregunta-respuesta** (QA).
 - ✅ **Interfaz web** con pestañas para entrenar, chatear y depurar.
-- ✅ **API compatible con OpenAI** (endpoint `OpenAI.php`) para integrar con otras aplicaciones.
+- ✅ **API compatible con OpenAI** (endpoint `/chat/completions`) para integrar con otras aplicaciones.
 - ✅ **Parámetros avanzados**: temperatura, top‑K, top‑P, penalización de frecuencia, penalización de presencia y penalización de repetición.
 - ✅ **Persistencia**: el modelo se guarda en disco (`models/tiny-php/`) y se recarga automáticamente.
 - ✅ **Historial de conversación** y exportación a JSON o texto.
@@ -63,7 +63,7 @@ Esta arquitectura **entiende mejor las relaciones semánticas** y **generaliza d
 
 ## Instalación
 
-1. **Descarga** todos los archivos (`index.php`, `OpenAI.php`, `LLM.php`) en la raíz de tu servidor web (por ejemplo, `/var/www/html/`).
+1. **Descarga** todos los archivos (`index.php`, `OpenAI.php`, `LLM.php`) en la **raíz** de tu servidor web (por ejemplo, `/var/www/html/`).
 2. **Crea la carpeta `models`** y dale permisos de escritura:
 
    ```bash
