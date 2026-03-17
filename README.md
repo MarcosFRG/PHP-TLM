@@ -1,6 +1,6 @@
 # PHP TLM - Modelo de Lenguaje Pequeño en PHP
 
-¡Bienvenido a **PHP TLM**! Un modelo de lenguaje pequeño (tiny) implementado completamente en PHP, basado en **PPM (Prediction by Partial Matching)** y tokenización simple. Ideal para experimentar, aprender y ejecutar en entornos de alojamiento compartido sin necesidad de GPUs.
+¡Bienvenido a **PHP TLM**! Un modelo de lenguaje pequeño (tiny) implementado completamente en PHP, que ha evolucionado desde un simple predictor estadístico hasta un **sistema híbrido con capacidades semánticas**. Ideal para experimentar, aprender y ejecutar en entornos de alojamiento compartido sin necesidad de GPUs.
 
 ## Características
 
@@ -10,6 +10,28 @@
 - ✅ **Parámetros avanzados**: temperatura, top‑K, top‑P, penalización de frecuencia, penalización de presencia y penalización de repetición.
 - ✅ **Persistencia**: el modelo se guarda en disco (`models/tiny-php/`) y se recarga automáticamente.
 - ✅ **Historial de conversación** y exportación a JSON o texto.
+
+## 🧠 Evolución del modelo: De la estadística pura a la semántica híbrida
+
+Lo que comenzó como un experimento con **PPM (Prediction by Partial Matching)** puro ha evolucionado hacia una arquitectura mucho más interesante. PHP TLM ya no es solo estadística; es un **modelo híbrido** que combina frecuencias con **representaciones semánticas aprendidas**.
+
+### 🏗️ Arquitectura híbrida actual
+
+- **Base Estadística (PPM)**: El núcleo tradicional que aprende frecuencias y secuencias de tokens.
+- **Embeddings Semánticos (32 dimensiones)**: Cada token del vocabulario tiene un vector numérico que **aprende su significado** durante el entrenamiento. Tokens con significado similar tienden a tener vectores parecidos.
+- **Caché de Contexto Semántico**: El modelo almacena hasta 5.000 pares de contexto + token generado, con sus respectivos embeddings.
+- **Generación Híbrida**: Al predecir, combina inteligentemente:
+  - **70%** de la probabilidad estadística del PPM.
+  - **30%** de la similitud semántica con contextos almacenados en caché.
+
+### ✨ ¿Qué logra esto?
+
+- **Generalización**: El modelo puede inferir respuestas para contextos no vistos basándose en **contextos semánticamente similares** almacenados.
+- **Memoria Asociativa**: La caché actúa como una memoria a corto plazo que influye en las decisiones.
+- **Aprendizaje Continuo**: Cada entrenamiento ajusta los embeddings, refinando la comprensión semántica del modelo con cada iteración.
+- **Mayor Coherencia**: Al entender relaciones entre conceptos, las respuestas son más ricas y menos mecánicas.
+
+Este enfoque demuestra que es posible crear sistemas con **capacidades semánticas emergentes** fuera de los grandes frameworks de deep learning, usando únicamente PHP puro. Es un paso hacia un modelo que no solo recuerda, sino que **comienza a "comprender"** las relaciones entre las ideas.
 
 ## Archivos del proyecto
 
