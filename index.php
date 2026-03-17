@@ -25,9 +25,6 @@ if ($action === 'train' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $batch = trim($batch);
             if (empty($batch)) continue;
 
-            // Verificar que el lote termine con <|EOS|>
-            if (!str_ends_with($batch, '<|EOS|>')) $batch .= '<|EOS|>';
-
             try {
                 $llm->train($batch);
                 $totalTokens = $llm->getVocabSize();
@@ -62,7 +59,7 @@ if ($action === 'train_qa' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => false, 'message' => 'La pregunta y la respuesta no pueden estar vacías.']);
             exit;
         }
-        $text = $question . ' ' . $answer . '<|EOS|>';
+        $text = "<|USER|>\n$question\n<|EOS|>\n<|ASSISSTANT|>\n$answer\n<|EOS|>";
         $llm->train($text);
         echo json_encode([
             'success' => true,
