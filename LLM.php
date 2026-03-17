@@ -620,23 +620,16 @@ class LLM {
     if ($this->tokenizer->getVocabSize() === 0) return $prompt;
 
     $states = [];
-
-    // Procesar todos los tokens del prompt para inicializar estados
-    foreach ($ids as $id) $this->forwardRWKV($id, $states);
+    $lastOutput = null;
+    foreach ($ids as $id) $lastOutput = $this->forwardRWKV($id, $states);
 
     $generatedIds = [];
     $freqCount = [];
-    $states = [];
-    $currentIds = $ids;
-    $lastOutput = null;
-
-    foreach ($currentIds as $id) $lastOutput = $this->forwardRWKV($id, $states);
 
     for ($i = 0; $i < $maxTokens; $i++) {
       $logits = [];
       foreach ($this->embeddings as $id => $emb) $logits[$id] = $this->cosineSimilarity($lastOutput, $emb);
 
-      // Aplicar temperatura
       $maxLogit = max($logits);
       $expSum = 0.0;
       foreach ($logits as $id => $l) {
@@ -647,7 +640,6 @@ class LLM {
       $probs = [];
       foreach ($logits as $id => $e) $probs[$id] = $e / $expSum;
 
-      // Aplicar topK, topP, penalizaciones (igual que antes)
       if ($topK !== null && $topK > 0 && count($probs) > $topK) {
         arsort($probs);
         $probs = array_slice($probs, 0, $topK, true);
@@ -695,7 +687,6 @@ class LLM {
         foreach ($probs as $id => $p) $probs[$id] = $p / $sum;
       }
 
-      // Seleccionar token
       $rand = mt_rand() / mt_getrandmax();
       $cum = 0.0;
       $selected = null;
@@ -708,11 +699,8 @@ class LLM {
       $token = $this->tokenizer->decode([$selected])[0];
       if (in_array($token, $allStopTokens, true)) break;
 
-      $currentIds[] = $selected;
       $generatedIds[] = $selected;
       $freqCount[$selected] = ($freqCount[$selected] ?? 0) + 1;
-
-      // Procesar el nuevo token para actualizar estados y obtener nuevo lastOutput
       $lastOutput = $this->forwardRWKV($selected, $states);
     }
 

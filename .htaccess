@@ -1,0 +1,2 @@
+RewriteEngine On
+RewriteRule ^chat/completions$ /OpenAI.php [L]
