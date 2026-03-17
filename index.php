@@ -14,10 +14,37 @@ if ($action === 'train' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => false, 'message' => 'El texto no puede estar vacío.']);
             exit;
         }
-        $llm->train($text);
+
+        // Dividir el texto por lotes usando líneas vacías como separadores
+        $batches = preg_split('/\n\s*\n/', $text);
+        $totalTokens = 0;
+        $processedBatches = 0;
+        $errors = [];
+
+        foreach ($batches as $batch) {
+            $batch = trim($batch);
+            if (empty($batch)) continue;
+
+            // Verificar que el lote termine con <|EOS|>
+            if (!str_ends_with($batch, '<|EOS|>')) $batch .= '<|EOS|>';
+
+            try {
+                $llm->train($batch);
+                $totalTokens = $llm->getVocabSize();
+                $processedBatches++;
+            } catch (Exception $e) {
+                $errors[] = "Error en lote " . ($processedBatches + 1) . ": " . $e->getMessage();
+            }
+        }
+
+        $message = "Modelo entrenado con $processedBatches lote(s). Vocabulario: $totalTokens tokens.";
+        if (!empty($errors)) $message .= " Errores: " . implode('; ', $errors);
+
         echo json_encode([
             'success' => true, 
-            'message' => 'Modelo entrenado. Vocabulario: ' . $llm->getVocabSize() . ' tokens.',
+            'message' => $message,
+            'batches_processed' => $processedBatches,
+            'total_tokens' => $totalTokens,
             'received_length' => strlen($text),
             'received_preview' => substr($text, 0, 200) . (strlen($text) > 200 ? '…' : '')
         ]);
