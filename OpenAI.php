@@ -43,7 +43,12 @@ $llm = new LLM($model, 512);
 
 $topK = $topK > 0 ? $topK : null;
 
+$startTime = microtime(true);
 $response = $llm->generate($gInput, $maxTokens, $temperature, $topK, $frequencyPenalty, [], $topP, $repetitionPenalty, $presencePenalty);
+$msTime = round((microtime(true) - $startTime) * 1000);
 
-echo json_encode(['success' => true, 'id' => 'chatcmpl-'.time(), 'choices' => [['message' => ['role' => 'assistant', 'content' => $response]]]]);
+$promptTokens = count($llm->tokenizer->tokenize($gInput));
+$outputTokens = count($llm->tokenizer->tokenize($response));
+
+echo json_encode(['success' => true, 'id' => 'chatcmpl-'.uniqid(), 'choices' => [['message' => ['role' => 'assistant', 'content' => $response]]], 'usage' => ['prompt_tokens' => $promptTokens, 'completion_tokens' => $outputTokens, 'total_tokens' => $promptTokens + $outputTokens], 'timing_ms' => $msTime]);
 ?>
