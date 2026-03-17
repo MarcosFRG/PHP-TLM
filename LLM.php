@@ -99,9 +99,7 @@ class PPMTrie {
   private function getNode(array $context): ?array {
     $node = $this->root;
     foreach ($context as $token) {
-      if (!isset($node['children'][$token])) {
-        return null;
-      }
+      if (!isset($node['children'][$token])) return null;
       $node = $node['children'][$token];
     }
     return $node;
@@ -136,9 +134,7 @@ class PPMTrie {
       if ($weight < 1e-6) break;
     }
 
-    if (empty($probs)) {
-      $probs[0] = 1.0;
-    }
+    if (empty($probs)) $probs[0] = 1.0;
 
     if ($temperature != 1.0) {
       $sum = 0.0;
@@ -148,9 +144,7 @@ class PPMTrie {
         $sum += $p;
       }
       if ($sum > 0) {
-        foreach ($probs as $token => $p) {
-          $probs[$token] = $p / $sum;
-        }
+        foreach ($probs as $token => $p) $probs[$token] = $p / $sum;
       }
     }
 
@@ -159,9 +153,7 @@ class PPMTrie {
       $probs = array_slice($probs, 0, $topK, true);
       $sum = array_sum($probs);
       if ($sum > 0) {
-        foreach ($probs as $token => $p) {
-          $probs[$token] = $p / $sum;
-        }
+        foreach ($probs as $token => $p) $probs[$token] = $p / $sum;
       }
     }
 
@@ -172,15 +164,11 @@ class PPMTrie {
       foreach ($probs as $token => $p) {
         $cum += $p;
         $filtered[$token] = $p;
-        if ($cum >= $topP) {
-          break;
-        }
+        if ($cum >= $topP) break;
       }
       $sum = array_sum($filtered);
       if ($sum > 0) {
-        foreach ($filtered as $token => $p) {
-          $filtered[$token] = $p / $sum;
-        }
+        foreach ($filtered as $token => $p) $filtered[$token] = $p / $sum;
       }
       $probs = $filtered;
     }
@@ -188,76 +176,58 @@ class PPMTrie {
     return $probs;
   }
 
-  // Guardado binario para mayor velocidad
   public function save(string $path): void {
     $fp = fopen($path, 'wb');
     if (!$fp) return;
 
-    // Función recursiva para escribir el trie
     $writeNode = function($node) use (&$writeNode, $fp) {
-      // Escribir counts
       $counts = $node['counts'] ?? [];
-      fwrite($fp, pack('V', count($counts))); // Número de entradas en counts
+      fwrite($fp, pack('V', count($counts)));
       foreach ($counts as $token => $count) {
         fwrite($fp, pack('V', $token));
         fwrite($fp, pack('V', $count));
       }
-  
-      // Escribir children
       $children = $node['children'] ?? [];
-      fwrite($fp, pack('V', count($children))); // Número de hijos
+      fwrite($fp, pack('V', count($children)));
       foreach ($children as $token => $child) {
         fwrite($fp, pack('V', $token));
         $writeNode($child);
       }
     };
 
-    // Escribir globalCounts
     fwrite($fp, pack('V', count($this->globalCounts)));
     foreach ($this->globalCounts as $token => $count) {
       fwrite($fp, pack('V', $token));
       fwrite($fp, pack('V', $count));
     }
 
-    // Escribir totalTokens
     fwrite($fp, pack('V', $this->totalTokens));
-
-    // Escribir root
     $writeNode($this->root);
-
     fclose($fp);
   }
 
-  // Carga binaria
   public function load(string $path): void {
     if (!file_exists($path)) return;
 
     $fp = fopen($path, 'rb');
     if (!$fp) return;
 
-    // Función recursiva para leer el trie
     $readNode = function() use (&$readNode, $fp) {
       $node = ['counts' => [], 'children' => []];
-  
-      // Leer counts
       $countSize = unpack('V', fread($fp, 4))[1];
       for ($i = 0; $i < $countSize; $i++) {
         $token = unpack('V', fread($fp, 4))[1];
         $count = unpack('V', fread($fp, 4))[1];
         $node['counts'][$token] = $count;
       }
-  
-      // Leer children
       $childrenSize = unpack('V', fread($fp, 4))[1];
       for ($i = 0; $i < $childrenSize; $i++) {
         $token = unpack('V', fread($fp, 4))[1];
         $node['children'][$token] = $readNode();
       }
-  
       return $node;
     };
 
-    // Leer globalCounts
     $globalSize = unpack('V', fread($fp, 4))[1];
     for ($i = 0; $i < $globalSize; $i++) {
       $token = unpack('V', fread($fp, 4))[1];
@@ -265,12 +235,8 @@ class PPMTrie {
       $this->globalCounts[$token] = $count;
     }
 
-    // Leer totalTokens
     $this->totalTokens = unpack('V', fread($fp, 4))[1];
-
-    // Leer root
     $this->root = $readNode();
-
     fclose($fp);
   }
 }
@@ -280,9 +246,14 @@ class LLM {
   private PPMTrie $trie;
   private string $modelDir;
   private int $maxContext;
-  private array $specialTokens = ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>', '<EOS>'];
+  private array $specialTokens = ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
   private array $noSpaceBefore = ['.', ',', '!', '?', ';', ':', ')', ']', '}', '”', '’', '»'];
-  private array $noSpaceAfter = ['(', '[', '{', '“', '‘', '«', '¡', '?'];
+  private array $noSpaceAfter = ['(', '[', '{', '“', '‘', '«', '¡', '¿'];
+
+  private array $embeddings = [];
+  private int $embedDim = 32;
+  private float $learningRate = 0.01;
+  private array $contextCache = [];
 
   public function __construct(string $modelDir, int $maxContext = 512) {
     $this->modelDir = $modelDir;
@@ -291,6 +262,7 @@ class LLM {
 
     $tokenizerPath = $modelDir . '/tokenizer.json';
     $triePath = $modelDir . '/model.ppm';
+    $embedPath = $modelDir . '/embeddings.bin';
 
     if (file_exists($tokenizerPath)) {
       $this->tokenizer = new Tokenizer();
@@ -306,6 +278,81 @@ class LLM {
     } else {
       $this->trie = new PPMTrie();
     }
+
+    if (file_exists($embedPath)) {
+      $this->loadEmbeddings($embedPath);
+    } else {
+      $this->initEmbeddings();
+    }
+  }
+
+  private function initEmbeddings(): void {
+    $vocabSize = $this->tokenizer->getVocabSize();
+    for ($i = 0; $i < $vocabSize; $i++) $this->embeddings[$i] = $this->randomVector();
+  }
+
+  private function randomVector(): array {
+    $vec = [];
+    for ($i = 0; $i < $this->embedDim; $i++) $vec[] = (mt_rand(-100, 100) / 1000);
+    return $vec;
+  }
+
+  private function saveEmbeddings(string $path): void {
+    $fp = fopen($path, 'wb');
+    if (!$fp) return;
+    fwrite($fp, pack('V', $this->embedDim));
+    fwrite($fp, pack('V', count($this->embeddings)));
+    foreach ($this->embeddings as $id => $vec) {
+      fwrite($fp, pack('V', $id));
+      foreach ($vec as $val) fwrite($fp, pack('f', $val));
+    }
+    fclose($fp);
+  }
+
+  private function loadEmbeddings(string $path): void {
+    $fp = fopen($path, 'rb');
+    if (!$fp) return;
+    $dim = unpack('V', fread($fp, 4))[1];
+    $this->embedDim = $dim;
+    $count = unpack('V', fread($fp, 4))[1];
+    for ($i = 0; $i < $count; $i++) {
+      $id = unpack('V', fread($fp, 4))[1];
+      $vec = [];
+      for ($j = 0; $j < $dim; $j++) {
+        $val = unpack('f', fread($fp, 4))[1];
+        $vec[] = $val;
+      }
+      $this->embeddings[$id] = $vec;
+    }
+    fclose($fp);
+  }
+
+  private function averageEmbedding(array $ids): array {
+    $sum = array_fill(0, $this->embedDim, 0.0);
+    $count = 0;
+    foreach ($ids as $id) {
+      if (isset($this->embeddings[$id])) {
+        $vec = $this->embeddings[$id];
+        for ($i = 0; $i < $this->embedDim; $i++) $sum[$i] += $vec[$i];
+        $count++;
+      }
+    }
+    if ($count === 0) return $sum;
+    for ($i = 0; $i < $this->embedDim; $i++) $sum[$i] /= $count;
+    return $sum;
+  }
+
+  private function cosineSimilarity(array $a, array $b): float {
+    $dot = 0.0;
+    $normA = 0.0;
+    $normB = 0.0;
+    for ($i = 0; $i < $this->embedDim; $i++) {
+      $dot += $a[$i] * $b[$i];
+      $normA += $a[$i] * $a[$i];
+      $normB += $b[$i] * $b[$i];
+    }
+    if ($normA == 0 || $normB == 0) return 0;
+    return $dot / (sqrt($normA) * sqrt($normB));
   }
 
   public function train(string $text): void {
@@ -319,11 +366,23 @@ class LLM {
         $context = array_slice($ids, $i - $order + 1, $order);
         $next = $ids[$i + 1];
         $this->trie->add($context, $next);
+        $this->updateEmbedding($context, $next);
       }
     }
 
     $this->tokenizer->save($this->modelDir . '/tokenizer.json');
     $this->trie->save($this->modelDir . '/model.ppm');
+    $this->saveEmbeddings($this->modelDir . '/embeddings.bin');
+  }
+
+  private function updateEmbedding(array $context, int $next): void {
+    if (!isset($this->embeddings[$next])) $this->embeddings[$next] = $this->randomVector();
+    $contextAvg = $this->averageEmbedding($context);
+    $current = $this->embeddings[$next];
+    for ($i = 0; $i < $this->embedDim; $i++) $this->embeddings[$next][$i] += $this->learningRate * ($contextAvg[$i] - $current[$i]);
+    $key = implode(',', $context) . '|' . $next;
+    $this->contextCache[$key] = [$context, $next, $this->embeddings[$next]];
+    if (count($this->contextCache) > 5000) array_shift($this->contextCache);
   }
 
   public function generate(
@@ -339,7 +398,7 @@ class LLM {
   ): string {
     if(!str_contains($prompt, '<|')) $prompt = "<|USER|>\n".trim($prompt)."\n<|EOS|>\n<|ASSISTANT|>\n";
 
-    $allStopTokens = array_merge($stopTokens, ['<|EOS|>', '<EOS>']);
+    $allStopTokens = array_merge($stopTokens, ['<|EOS|>']);
 
     $tokens = $this->tokenizer->tokenize($prompt, true);
     $ids = $this->tokenizer->encode($tokens);
@@ -352,6 +411,24 @@ class LLM {
       $context = array_slice($ids, -$this->maxContext);
       $probs = $this->trie->predict($context, $this->maxContext, $temperature, $topK, $topP);
 
+      $contextVec = $this->averageEmbedding($context);
+      $semanticScores = [];
+      foreach ($this->contextCache as $cached) {
+        list($cachedContext, $cachedToken, $cachedEmbedding) = $cached;
+        $cachedContextVec = $this->averageEmbedding($cachedContext);
+        $sim = $this->cosineSimilarity($contextVec, $cachedContextVec);
+        if ($sim > 0.5) $semanticScores[$cachedToken] = ($semanticScores[$cachedToken] ?? 0) + $sim;
+      }
+      if (!empty($semanticScores)) {
+        $maxSem = max($semanticScores);
+        foreach ($semanticScores as $token => $score) $semanticScores[$token] = $score / $maxSem;
+        foreach ($probs as $token => $p) $probs[$token] = $p * 0.7 + ($semanticScores[$token] ?? 0) * 0.3;
+        $sum = array_sum($probs);
+        if ($sum > 0) {
+          foreach ($probs as $token => $p) $probs[$token] = $p / $sum;
+        }
+      }
+
       if ($frequencyPenalty > 0) {
         foreach ($probs as $id => $p) {
           $count = $freqCount[$id] ?? 0;
@@ -359,9 +436,7 @@ class LLM {
         }
         $sum = array_sum($probs);
         if ($sum > 0) {
-          foreach ($probs as $id => $p) {
-            $probs[$id] = $p / $sum;
-          }
+          foreach ($probs as $id => $p) $probs[$id] = $p / $sum;
         }
       }
 
@@ -374,9 +449,7 @@ class LLM {
         }
         $sum = array_sum($probs);
         if ($sum > 0) {
-          foreach ($probs as $id => $p) {
-            $probs[$id] = $p / $sum;
-          }
+          foreach ($probs as $id => $p) $probs[$id] = $p / $sum;
         }
       }
 
@@ -389,9 +462,7 @@ class LLM {
         }
         $sum = array_sum($probs);
         if ($sum > 0) {
-          foreach ($probs as $id => $p) {
-            $probs[$id] = $p / $sum;
-          }
+          foreach ($probs as $id => $p) $probs[$id] = $p / $sum;
         }
       }
 
@@ -405,18 +476,14 @@ class LLM {
           break;
         }
       }
-      if ($selected === null) {
-        $selected = array_key_first($probs) ?? 0;
-      }
+      if ($selected === null) $selected = array_key_first($probs) ?? 0;
+
+      $token = $this->tokenizer->decode([$selected])[0];
+      if (in_array($token, $allStopTokens, true)) break;
 
       $ids[] = $selected;
       $generatedIds[] = $selected;
       $freqCount[$selected] = ($freqCount[$selected] ?? 0) + 1;
-
-      $token = $this->tokenizer->decode([$selected])[0];
-      if (in_array($token, $allStopTokens, true)) {
-        break;
-      }
     }
 
     $outputTokens = $this->tokenizer->decode($generatedIds);
@@ -425,7 +492,7 @@ class LLM {
       return !in_array($token, $this->specialTokens);
     });
 
-    return $this->joinTokens($filteredTokens);
+    return trim($this->joinTokens($filteredTokens));
   }
 
   private function joinTokens(array $tokens): string {
@@ -439,13 +506,9 @@ class LLM {
       }
       $addSpace = false;
       if ($result !== '') {
-        if (!in_array($token, $this->noSpaceBefore) && !in_array($prevToken, $this->noSpaceAfter)) {
-          $addSpace = true;
-        }
+        if (!in_array($token, $this->noSpaceBefore) && !in_array($prevToken, $this->noSpaceAfter)) $addSpace = true;
       }
-      if ($addSpace) {
-        $result .= ' ';
-      }
+      if ($addSpace) $result .= ' ';
       $result .= $token;
       $prevToken = $token;
     }
