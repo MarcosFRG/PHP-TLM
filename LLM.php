@@ -626,12 +626,6 @@ class LLM {
 
     $generatedIds = [];
     $freqCount = [];
-
-    for ($i = 0; $i < $maxTokens; $i++) {
-      $lastVec = $this->forwardRWKV(end($ids), $states);
-      $currentVec = $lastVec;
-    }
-
     $states = [];
     $currentIds = $ids;
     $lastOutput = null;
