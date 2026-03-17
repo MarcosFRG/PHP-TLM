@@ -129,7 +129,7 @@ Puedes ajustar los parámetros de generación:
 
 ## API estilo OpenAI (endpoint `OpenAI.php`)
 
-Si deseas usar el modelo desde otras aplicaciones, envía peticiones POST a `OpenAI.php` con el siguiente formato JSON (similar a la API de OpenAI):
+Si deseas usar el modelo desde otras aplicaciones, envía peticiones POST a `/chat/completions` (o directamente al archivo `OpenAI.php`) con el siguiente formato JSON (similar a la API de OpenAI):
 
 ```json
 {
@@ -148,7 +148,7 @@ Si deseas usar el modelo desde otras aplicaciones, envía peticiones POST a `Ope
 }
 ```
 
-La respuesta será:
+La respuesta será algo como:
 
 ```json
 {
