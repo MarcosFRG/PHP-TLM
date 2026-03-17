@@ -565,7 +565,7 @@ class LLM {
   }
 
   public function train(string $text): void {
-    $batches = preg_split('/\n\s*\n/', $text);
+    $batches = preg_split('/(?<=<\|EOS\|>)\n\s*\n\s*(?=<\|)/', $text);
     foreach ($batches as $batch) {
       $batch = trim($batch);
       if (empty($batch)) continue;
