@@ -7,7 +7,7 @@ if(empty($input)){
   exit;
 }
 
-$model = preg_replace('/[^a-zA-Z0-9_\-]/', '', 'models/'.($input['model'] ?? 'tiny-php'));
+$model = preg_replace('/[^a-zA-Z0-9_\-]/', '', 'all-models/'.($input['model'] ?? 'tiny-php'));
 if(!file_exists($model)){
   http_response_code(404);
   echo '{"success":false,"message":"Not Found","status":404}';
