@@ -311,7 +311,7 @@ if ($action === 'delete_model' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <div>
                 <label>Temperatura</label>
-                <input type="number" id="temperature" value="0.8" min="0.1" max="2.0" step="0.1">
+                <input type="number" id="temperature" value="0.7" min="0.1" max="2.0" step="0.1">
             </div>
             <div>
                 <label>Top-K</label>
@@ -320,8 +320,8 @@ if ($action === 'delete_model' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     <option value="3">3</option>
                     <option value="5">5</option>
                     <option value="10">10</option>
-                    <option value="20" selected>20</option>
-                    <option value="50">50</option>
+                    <option value="20">20</option>
+                    <option value="50" selected>50</option>
                     <option value="0">0 (todas)</option>
                 </select>
             </div>

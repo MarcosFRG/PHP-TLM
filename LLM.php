@@ -257,7 +257,7 @@ class RWKVBlock {
     $this->ww = $this->randomVector($dim);
     $this->w1 = $this->randomMatrix($dim * 4, $dim);
     $this->w2 = $this->randomMatrix($dim, $dim * 4);
-    $this->state = array_fill(0, $dim, 0.0);
+    $this->state = ['num' => array_fill(0, $dim, 0.0), 'den' => array_fill(0, $dim, 0.0)];
   }
 
   private function randomMatrix(int $rows, int $cols): array {
@@ -291,12 +291,6 @@ class RWKVBlock {
     // w es decay por canal (vector)
     $dim = $this->dim;
     $out = array_fill(0, $dim, 0.0);
-    $newState = $state;
-
-    if (!isset($state['num'])) {
-      $state['num'] = array_fill(0, $dim, 0.0);
-      $state['den'] = array_fill(0, $dim, 0.0);
-    }
 
     $num = &$state['num'];
     $den = &$state['den'];
@@ -398,13 +392,26 @@ class LLM {
 
   private function initEmbeddings(): void {
     $vocabSize = $this->tokenizer->getVocabSize();
-    for ($i = 0; $i < $vocabSize; $i++) $this->embeddings[$i] = $this->randomVector();
+    for ($i = 0; $i < $vocabSize; $i++) {
+      $vec = $this->randomVector();
+      $this->embeddings[$i] = $this->normalizeVector($vec);
+    }
   }
 
   private function randomVector(): array {
     $vec = [];
     for ($i = 0; $i < $this->embedDim; $i++) $vec[] = (mt_rand(-100, 100) / 1000);
     return $vec;
+  }
+
+  private function normalizeVector(array $vec): array {
+    $norm = 0.0;
+    foreach ($vec as $v) $norm += $v * $v;
+    $norm = sqrt($norm);
+    if ($norm < 1e-10) return $vec;
+    $normalized = [];
+    foreach ($vec as $v) $normalized[] = $v / $norm;
+    return $normalized;
   }
 
   private function saveEmbeddings(string $path): void {
@@ -589,10 +596,15 @@ class LLM {
       for ($i = 0; $i < $len - 1; $i++) {
         $context = array_slice($ids, max(0, $i - 5), $i - max(0, $i - 5) + 1);
         $next = $ids[$i + 1];
-        if (!isset($this->embeddings[$next])) $this->embeddings[$next] = $this->randomVector();
+
+        if (!isset($this->embeddings[$next])) $this->embeddings[$next] = $this->normalizeVector($this->randomVector());
+
         $contextAvg = $this->averageEmbedding($context);
         $current = $this->embeddings[$next];
+
         for ($d = 0; $d < $this->embedDim; $d++) $this->embeddings[$next][$d] += $this->learningRate * ($contextAvg[$d] - $current[$d]);
+
+        $this->embeddings[$next] = $this->normalizeVector($this->embeddings[$next]);
       }
     }
 
@@ -627,8 +639,22 @@ class LLM {
     $freqCount = [];
 
     for ($i = 0; $i < $maxTokens; $i++) {
+      $lastNorm = 0.0;
+      foreach ($lastOutput as $v) $lastNorm += $v * $v;
+      $lastNorm = sqrt($lastNorm);
+      if ($lastNorm > 1e-10) {
+        $lastNormalized = [];
+        foreach ($lastOutput as $v) $lastNormalized[] = $v / $lastNorm;
+      } else {
+        $lastNormalized = $lastOutput;
+      }
+
       $logits = [];
-      foreach ($this->embeddings as $id => $emb) $logits[$id] = $this->cosineSimilarity($lastOutput, $emb);
+      foreach ($this->embeddings as $id => $emb) {
+        $dot = 0.0;
+        for ($j = 0; $j < $this->embedDim; $j++) $dot += $lastNormalized[$j] * $emb[$j];
+        $logits[$id] = $dot;
+      }
 
       $maxLogit = max($logits);
       $expSum = 0.0;
