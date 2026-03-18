@@ -152,25 +152,8 @@ if ($action === 'set_topk' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($action === 'delete_model' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     try {
-        $files = [
-            $modelDir . '/tokenizer.json',
-            $modelDir . '/model.bin',
-        ];
-        $deleted = [];
-        $errors = [];
-        foreach ($files as $file) {
-            if (file_exists($file)) {
-                if (unlink($file)) {
-                    $deleted[] = basename($file);
-                } else {
-                    $errors[] = basename($file);
-                }
-            }
-        }
+        $llm->deleteModelFiles();
         $_SESSION['chat_history'] = [];
-        if(!is_dir($modelDir)) mkdir($modelDir, 0777, true);
-        $llm = null;
-        $llm = new LLM($modelDir, $maxContext);
         echo json_encode([
             'success' => true,
             'message' => 'Modelo eliminado correctamente.',

@@ -68,10 +68,13 @@ class EchoStateLM {
   private int $embedDim = 100;
   private int $reservoirSize = 500;
   private float $lr = 0.1;
+  private float $lrDecay = 0.999;
   private float $spectralRadius = 0.9;
   private float $sparsity = 0.1;
+  private float $gradClip = 1.0;
 
   private array $embeddings;
+  private array $embeddingGrads;
   private array $W_in;
   private array $W_res;
   private array $bias;
@@ -81,11 +84,11 @@ class EchoStateLM {
   public function __construct(Tokenizer $tokenizer) {
     $this->initFixedWeights();
     $this->embeddings = [];
+    $this->embeddingGrads = [];
     $this->W_out = [];
   }
 
   private function initFixedWeights(): void {
-    // Matriz de entrada dispersa
     $this->W_in = [];
     $totalIn = $this->reservoirSize * $this->embedDim;
     $numNonZeroIn = (int)($totalIn * $this->sparsity);
@@ -96,7 +99,6 @@ class EchoStateLM {
       $this->W_in[] = [$i, $j, $val];
     }
 
-    // Matriz recurrente dispersa
     $this->W_res = [];
     $totalRes = $this->reservoirSize * $this->reservoirSize;
     $numNonZeroRes = (int)($totalRes * $this->sparsity);
@@ -107,29 +109,28 @@ class EchoStateLM {
       $this->W_res[] = [$i, $j, $val];
     }
 
-    // Escalar para radio espectral aproximado
     $scale = $this->spectralRadius / 1.0;
     foreach ($this->W_res as &$w) $w[2] *= $scale;
 
-    // Bias
     $this->bias = [];
     for ($i = 0; $i < $this->reservoirSize; $i++) $this->bias[] = (mt_rand(-10, 10) / 100.0);
   }
 
-  // Asegura que exista embedding y fila en W_out para un token ID
+  public function setLearningRate(float $lr): void {
+    $this->lr = $lr;
+  }
+
   private function ensureToken(int $tokenId): void {
     if (!isset($this->embeddings[$tokenId])) {
-      // Crear embedding aleatorio
       $vec = [];
       for ($j = 0; $j < $this->embedDim; $j++) $vec[] = (mt_rand(-100, 100) / 1000.0);
       $this->embeddings[$tokenId] = $vec;
+      $this->embeddingGrads[$tokenId] = array_fill(0, $this->embedDim, 0.0);
 
-      // Crear fila en W_out aleatoria
       $row = [];
       for ($j = 0; $j < $this->reservoirSize; $j++) $row[] = (mt_rand(-10, 10) / 1000.0);
       $this->W_out[$tokenId] = $row;
 
-      // Actualizar vocabSize si es necesario
       if ($tokenId >= $this->vocabSize) $this->vocabSize = $tokenId + 1;
     }
   }
@@ -160,27 +161,25 @@ class EchoStateLM {
 
     $state = array_fill(0, $this->reservoirSize, 0.0);
     $totalLoss = 0.0;
+    $stepCount = 0;
 
     for ($t = 0; $t < $len - 1; $t++) {
       $tokenId = $ids[$t];
       $nextId = $ids[$t + 1];
 
-      // Asegurar que ambos tokens existen
       $this->ensureToken($tokenId);
       $this->ensureToken($nextId);
 
       $x = $this->embeddings[$tokenId];
-      $state = $this->updateState($state, $x);
+      $newState = $this->updateState($state, $x);
 
-      // Calcular logits (solo para los tokens que existen en W_out)
       $logits = [];
       foreach ($this->W_out as $id => $row) {
         $dot = 0.0;
-        for ($j = 0; $j < $this->reservoirSize; $j++) $dot += $row[$j] * $state[$j];
+        for ($j = 0; $j < $this->reservoirSize; $j++) $dot += $row[$j] * $newState[$j];
         $logits[$id] = $dot;
       }
 
-      // Softmax y pérdida
       $maxLogit = max($logits);
       $expSum = 0.0;
       $probs = [];
@@ -192,17 +191,51 @@ class EchoStateLM {
       $loss = -log(($probs[$nextId] ?? 0.0) / $expSum + 1e-10);
       $totalLoss += $loss;
 
-      // Gradiente de la pérdida con respecto a los logits
       $dLogits = [];
       foreach ($logits as $id => $l) $dLogits[$id] = ($probs[$id] / $expSum) - ($id == $nextId ? 1.0 : 0.0);
+
+      $dState = array_fill(0, $this->reservoirSize, 0.0);
+      foreach ($dLogits as $id => $d) {
+        if (abs($d) < 1e-8) continue;
+        $row = $this->W_out[$id];
+        for ($j = 0; $j < $this->reservoirSize; $j++) $dState[$j] += $d * $row[$j];
+      }
+
+      $gradNorm = 0.0;
+      foreach ($dState as $val) $gradNorm += $val * $val;
+      $gradNorm = sqrt($gradNorm);
+      if ($gradNorm > $this->gradClip) {
+        $scale = $this->gradClip / $gradNorm;
+        foreach ($dState as &$v) $v *= $scale;
+      }
 
       foreach ($dLogits as $id => $d) {
         if (abs($d) < 1e-8) continue;
         $row = &$this->W_out[$id];
-        for ($j = 0; $j < $this->reservoirSize; $j++) $row[$j] -= $this->lr * $d * $state[$j];
+        for ($j = 0; $j < $this->reservoirSize; $j++) $row[$j] -= $this->lr * $d * $newState[$j];
       }
+
+      $dx = array_fill(0, $this->embedDim, 0.0);
+      foreach ($this->W_in as $entry) {
+        [$i, $j, $val] = $entry;
+        $dx[$j] += $dState[$i] * $val * (1 - $newState[$i] * $newState[$i]);
+      }
+
+      $gradEmbedNorm = 0.0;
+      foreach ($dx as $v) $gradEmbedNorm += $v * $v;
+      $gradEmbedNorm = sqrt($gradEmbedNorm);
+      if ($gradEmbedNorm > $this->gradClip) {
+        $scale = $this->gradClip / $gradEmbedNorm;
+        foreach ($dx as &$v) $v *= $scale;
+      }
+
+      for ($j = 0; $j < $this->embedDim; $j++) $this->embeddings[$tokenId][$j] -= $this->lr * $dx[$j];
+
+      $state = $newState;
+      $stepCount++;
     }
 
+    $this->lr *= $this->lrDecay;
     return $totalLoss / ($len - 1);
   }
 
@@ -313,34 +346,24 @@ class EchoStateLM {
     fwrite($fp, pack('V', $this->embedDim));
     fwrite($fp, pack('V', $this->reservoirSize));
     fwrite($fp, pack('V', $this->vocabSize));
-
-    // Guardar embeddings (solo los que existen)
     fwrite($fp, pack('V', count($this->embeddings)));
     foreach ($this->embeddings as $id => $vec) {
       fwrite($fp, pack('V', $id));
       for ($j = 0; $j < $this->embedDim; $j++) fwrite($fp, pack('f', $vec[$j]));
     }
-
-    // Guardar W_in
     fwrite($fp, pack('V', count($this->W_in)));
     foreach ($this->W_in as $e) {
       fwrite($fp, pack('V', $e[0]));
       fwrite($fp, pack('V', $e[1]));
       fwrite($fp, pack('f', $e[2]));
     }
-
-    // Guardar W_res
     fwrite($fp, pack('V', count($this->W_res)));
     foreach ($this->W_res as $e) {
       fwrite($fp, pack('V', $e[0]));
       fwrite($fp, pack('V', $e[1]));
       fwrite($fp, pack('f', $e[2]));
     }
-
-    // Guardar bias
     for ($i = 0; $i < $this->reservoirSize; $i++) fwrite($fp, pack('f', $this->bias[$i]));
-
-    // Guardar W_out
     fwrite($fp, pack('V', count($this->W_out)));
     foreach ($this->W_out as $id => $row) {
       fwrite($fp, pack('V', $id));
@@ -359,17 +382,17 @@ class EchoStateLM {
     $this->reservoirSize = $reservoirSize;
     $this->vocabSize = $vocabSize;
 
-    // Cargar embeddings
     $numEmb = unpack('V', fread($fp, 4))[1];
     $this->embeddings = [];
+    $this->embeddingGrads = [];
     for ($k = 0; $k < $numEmb; $k++) {
       $id = unpack('V', fread($fp, 4))[1];
       $vec = [];
       for ($j = 0; $j < $embedDim; $j++) $vec[] = unpack('f', fread($fp, 4))[1];
       $this->embeddings[$id] = $vec;
+      $this->embeddingGrads[$id] = array_fill(0, $embedDim, 0.0);
     }
 
-    // Cargar W_in
     $numIn = unpack('V', fread($fp, 4))[1];
     $this->W_in = [];
     for ($k = 0; $k < $numIn; $k++) {
@@ -379,7 +402,6 @@ class EchoStateLM {
       $this->W_in[] = [$i, $j, $val];
     }
 
-    // Cargar W_res
     $numRes = unpack('V', fread($fp, 4))[1];
     $this->W_res = [];
     for ($k = 0; $k < $numRes; $k++) {
@@ -389,11 +411,9 @@ class EchoStateLM {
       $this->W_res[] = [$i, $j, $val];
     }
 
-    // Cargar bias
     $this->bias = [];
     for ($i = 0; $i < $reservoirSize; $i++) $this->bias[] = unpack('f', fread($fp, 4))[1];
 
-    // Cargar W_out
     $numOut = unpack('V', fread($fp, 4))[1];
     $this->W_out = [];
     for ($k = 0; $k < $numOut; $k++) {
@@ -436,7 +456,8 @@ class LLM {
     }
   }
 
-  public function train(string $text): void {
+  public function train(string $text, float $learningRate = 0.1): void {
+    $this->model->setLearningRate($learningRate);
     $batches = preg_split('/(?<=<\|EOS\|>)\n\s*\n\s*(?=<\|)/', $text);
     foreach ($batches as $batch) {
       $batch = trim($batch);
@@ -447,7 +468,6 @@ class LLM {
       $ids = $this->tokenizer->encode($tokens);
       if (count($ids) < 2) continue;
 
-      // Asegurar que el modelo conozca todos los IDs (ya se hace internamente)
       $loss = $this->model->trainOnSequence($ids);
     }
 
@@ -519,7 +539,6 @@ class LLM {
     foreach ($files as $file) {
       if (file_exists($file)) unlink($file);
     }
-    // Reiniciar modelo
     $this->model = new EchoStateLM($this->tokenizer);
   }
 }
