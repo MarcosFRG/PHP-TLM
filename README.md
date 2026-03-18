@@ -1,5 +1,7 @@
 # PHP TLM - Modelo de Lenguaje Pequeño en PHP
 
+_(Experimental)_
+
 ¡Bienvenido a **PHP TLM**! Un modelo de lenguaje pequeño (tiny) implementado completamente en PHP que ha evolucionado hasta convertirse en una **arquitectura RWKV (Receptance Weighted Key Value)** completa, combinando lo mejor de transformers y RNNs. Ideal para experimentar, aprender y ejecutar en entornos de alojamiento compartido sin necesidad de GPUs.
 
 ## Características
@@ -171,7 +173,7 @@ La respuesta será algo como:
 }
 ```
 
-**Nota:** El modelo se guarda en `models/tiny-php/` (por defecto). Puedes cambiar el nombre del modelo en el campo `model` (se creará una subcarpeta dentro de `models`).
+**Nota:** El modelo se guarda en `models/tiny-php/` (por defecto). Puedes cambiar el nombre del modelo en el campo `model` (se creará una subcarpeta dentro de `models`) y ver la lista por el endpoint `/models` (o directamente por el archivo `Models.php`).
 
 ## Estructura de almacenamiento del modelo
 
