@@ -208,8 +208,8 @@ El modelo se guarda en la carpeta `all-models/<nombre-del-modelo>/` con dos arch
 - **v0.1-alpha**: Modelo basado únicamente en PPM (estadístico).
 - **v0.2-alpha**: Introducción de embeddings y caché semántico híbrido.
 - **v0.3-alpha**: Arquitectura transformer-like con atención lineal, capas convolucionales y mezcladores.
-- **v0.4-alpha**: Arquitectura RWKV completa con time mixing, channel mixing y estados recurrentes.
-- **v0.5-alpha**: **Arquitectura Echo State Network (ESN)** con reservorio fijo y capa de salida entrenable. **Mayor eficiencia y buena capacidad de modelado secuencial**, velocidad lineal O(n).
+- **v0.4-beta**: Arquitectura RWKV completa con time mixing, channel mixing y estados recurrentes.
+- **v0.5-beta**: **Arquitectura Echo State Network (ESN)** con reservorio fijo y capa de salida entrenable. **Mayor eficiencia y buena capacidad de modelado secuencial**, velocidad lineal O(n).
 
 ---
 
