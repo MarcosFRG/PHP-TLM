@@ -115,10 +115,9 @@ Sí, PHP es mi lenguaje nativo 💻
 Haz un loop
 <|ASSISTANT|>
 for($i=0;$i<10;$i++){ echo $i; }
-<|EOS|>
 ```
 
-_El <|EOS|> final es innecesario_
+_Opcionalmente puedes poner `<|EOS|>` al final para que el modelo sepa detenerse solo_
 
 Puedes incluir este texto directamente en la pestaña **"Entrenar"**.
 
