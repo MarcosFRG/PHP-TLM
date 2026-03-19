@@ -8,14 +8,28 @@ class BPETokenizer {
     private string $unkToken = '<UNK>';
     private array $specialTokens = ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
 
+    // Para búsqueda rápida de tokens por longitud
+    private array $tokensByLength = [];
+
     public function __construct(array $vocab = [], array $merges = []) {
         if (!empty($vocab)) {
             $this->vocab = $vocab;
             $this->reverseVocab = array_flip($vocab);
+            $this->buildTokensByLength();
         }
         $this->merges = $merges;
         $this->addToken($this->spaceToken);
         foreach ($this->specialTokens as $st) $this->addToken($st);
+    }
+
+    private function buildTokensByLength(): void {
+        $this->tokensByLength = [];
+        foreach ($this->vocab as $token) {
+            $len = mb_strlen($token);
+            if (!isset($this->tokensByLength[$len])) $this->tokensByLength[$len] = [];
+            $this->tokensByLength[$len][] = $token;
+        }
+        krsort($this->tokensByLength);
     }
 
     private function addToken(string $token): int {
@@ -23,6 +37,10 @@ class BPETokenizer {
             $id = count($this->vocab);
             $this->vocab[$id] = $token;
             $this->reverseVocab[$token] = $id;
+            $len = mb_strlen($token);
+            if (!isset($this->tokensByLength[$len])) $this->tokensByLength[$len] = [];
+            $this->tokensByLength[$len][] = $token;
+            krsort($this->tokensByLength);
             return $id;
         }
         return $this->reverseVocab[$token];
@@ -31,6 +49,38 @@ class BPETokenizer {
     private function preTokenize(string $text): array {
         preg_match_all('/(<\|[^>]+\|>|<[^>]+>|\p{L}+|\p{N}+|\p{So}+|\p{P}+|\n)/u', $text, $matches);
         return $matches[0];
+    }
+
+    private function tokenizeWordGreedy(string $word): array {
+        $tokens = [];
+        $remaining = $word;
+        $pos = 0;
+        $len = mb_strlen($remaining);
+
+        while ($pos < $len) {
+            $matched = false;
+            foreach ($this->tokensByLength as $l => $tokenList) {
+                if ($l > $len - $pos) continue;
+                foreach ($tokenList as $token) {
+                    if (mb_substr($remaining, $pos, $l) === $token) {
+                        $tokens[] = $token;
+                        $pos += $l;
+                        $matched = true;
+                        break 2;
+                    }
+                }
+            }
+            if (!$matched) {
+                $ch = mb_substr($remaining, $pos, 1);
+                if (isset($this->reverseVocab[$ch])) {
+                    $tokens[] = $ch;
+                } else {
+                    $tokens[] = $this->unkToken;
+                }
+                $pos++;
+            }
+        }
+        return $tokens;
     }
 
     public function learnFromText(string $text, int $maxMerges = 10): void {
@@ -50,39 +100,54 @@ class BPETokenizer {
             $first = false;
         }
 
+        $totalWords = array_sum($wordFreqs);
+        $threshold = max(2, $totalWords * 0.01);
+
+        foreach ($wordFreqs as $word => $freq) {
+            if (in_array($word, $this->specialTokens, true)) continue;
+            $len = mb_strlen($word);
+            if ($len > 2 && $freq >= $threshold && !isset($this->reverseVocab[$word])) $this->addToken($word);
+        }
+
         $splits = [];
         foreach ($wordFreqs as $word => $freq) {
             if (in_array($word, $this->specialTokens, true)) {
                 $splits[$word] = [$this->reverseVocab[$word]];
             } else {
-                $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
-                $ids = [];
-                foreach ($chars as $ch) {
-                    if (!isset($this->reverseVocab[$ch])) $this->addToken($ch);
-                    $ids[] = $this->reverseVocab[$ch];
-                }
-                foreach ($this->merges as [$a, $b]) {
-                    $newIds = [];
-                    $i = 0;
-                    while ($i < count($ids)) {
-                        if ($i < count($ids)-1 && $this->vocab[$ids[$i]] === $a && $this->vocab[$ids[$i+1]] === $b) {
-                            $mergedToken = $a . $b;
-                            if (!isset($this->reverseVocab[$mergedToken])) {
-                                $this->addToken($mergedToken);
-                            }
-                            $newIds[] = $this->reverseVocab[$mergedToken];
-                            $i += 2;
-                        } else {
-                            $newIds[] = $ids[$i];
-                            $i++;
-                        }
+                // Si la palabra ya es un token completo, la representamos como tal
+                if (isset($this->reverseVocab[$word])) {
+                    $splits[$word] = [$this->reverseVocab[$word]];
+                } else {
+                    // Dividir en caracteres
+                    $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
+                    $ids = [];
+                    foreach ($chars as $ch) {
+                        if (!isset($this->reverseVocab[$ch])) $this->addToken($ch);
+                        $ids[] = $this->reverseVocab[$ch];
                     }
-                    $ids = $newIds;
+                    // Aplicar merges existentes (para mantener consistencia)
+                    foreach ($this->merges as [$a, $b]) {
+                        $newIds = [];
+                        $i = 0;
+                        while ($i < count($ids)) {
+                            if ($i < count($ids)-1 && $this->vocab[$ids[$i]] === $a && $this->vocab[$ids[$i+1]] === $b) {
+                                $mergedToken = $a . $b;
+                                if (!isset($this->reverseVocab[$mergedToken])) $this->addToken($mergedToken);
+                                $newIds[] = $this->reverseVocab[$mergedToken];
+                                $i += 2;
+                            } else {
+                                $newIds[] = $ids[$i];
+                                $i++;
+                            }
+                        }
+                        $ids = $newIds;
+                    }
+                    $splits[$word] = $ids;
                 }
-                $splits[$word] = $ids;
             }
         }
 
+        // Aprender nuevos merges
         for ($m = 0; $m < $maxMerges; $m++) {
             $pairFreqs = [];
             foreach ($splits as $word => $ids) {
@@ -99,13 +164,14 @@ class BPETokenizer {
             arsort($pairFreqs);
             $bestPair = key($pairFreqs);
             list($a, $b) = explode('|', $bestPair);
-            $newToken = $a.$b;
+            $newToken = $a . $b;
 
             if (isset($this->reverseVocab[$newToken])) continue;
 
             $newId = $this->addToken($newToken);
             $this->merges[] = [$a, $b];
 
+            // Actualizar splits
             foreach ($splits as $word => &$ids) {
                 $newIds = [];
                 $i = 0;
@@ -148,13 +214,15 @@ class BPETokenizer {
                     $word = $seg;
                 }
                 $first = false;
+
+                $wordTokens = $this->tokenizeWordGreedy($word);
+                $result = array_merge($result, $wordTokens);
             } else {
                 $word = $seg;
                 $first = false;
+                $subTokens = $this->bpeSplit($word);
+                $result = array_merge($result, $subTokens);
             }
-
-            $subTokens = $this->bpeSplit($word);
-            $result = array_merge($result, $subTokens);
         }
 
         if ($useCache) $this->cache[$text] = $result;
@@ -223,6 +291,7 @@ class BPETokenizer {
         $this->spaceToken = $data['spaceToken'] ?? '▁';
         $this->unkToken = $data['unkToken'] ?? '<UNK>';
         $this->specialTokens = $data['specialTokens'] ?? ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
+        $this->buildTokensByLength();
     }
 
     public function getVocabSize(): int {
