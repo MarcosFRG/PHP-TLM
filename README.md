@@ -237,3 +237,5 @@ El modelo se guarda en la carpeta `all-models/<nombre-del-modelo>/` con tres arc
 
 ¡Disfruta experimentando con tu propio LLM en PHP!  
 Cualquier mejora o sugerencia, no dudes en compartir.
+
+[¡Únete al grupo oficial en Telegram!](https://t.me/+r2n_tkBdFoM0NTNh)
