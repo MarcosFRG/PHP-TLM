@@ -15,7 +15,7 @@ _(Experimental)_
 - ✅ **Historial de conversación** y exportación a JSON o texto.
 - ✅ **Arquitectura RWKV con BPTT**: 4 capas con time mixing y channel mixing, entrenables mediante retropropagación completa.
 - ✅ **Optimizador Adam**: implementado desde cero para una convergencia estable.
-- ✅ **Embeddings normalizados**: 128 dimensiones, aprendidos durante el entrenamiento.
+- ✅ **Embeddings normalizados**: 128 dimensiones (configurable), aprendidos durante el entrenamiento.
 - ✅ **Complejidad lineal O(n)**: generación rápida incluso con contextos largos.
 
 ## 🧠 Arquitectura del modelo
@@ -27,7 +27,7 @@ PHP TLM implementa **RWKV (Receptance Weighted Key Value)** , un modelo de vangu
 | Componente | Descripción |
 |------------|-------------|
 | **BPETokenizer** | Tokenizador que aprende merges BPE del texto de entrenamiento (máximo 10 merges por llamada a `train`). |
-| **Embeddings** | Vectores de 128 dimensiones para cada token, normalizados y aprendidos durante el entrenamiento. |
+| **Embeddings** | Vectores de `EMB_DIM` (por defecto 128) dimensiones para cada token, normalizados y aprendidos durante el entrenamiento. |
 | **RWKVBlock (x4)** | Bloque RWKV con time mixing y channel mixing, totalmente entrenable. |
 | │ ├─ **wk, wv, wr** | Pesos para key, value y receptance (matrices [dim][dim]). |
 | │ ├─ **ww** | Vector de decay aprendible (dim). |
@@ -39,7 +39,7 @@ PHP TLM implementa **RWKV (Receptance Weighted Key Value)** , un modelo de vangu
 ### Flujo de entrenamiento
 
 1. **Preprocesado**: se normalizan los espacios alrededor de tokens especiales (`<|SYSTEM|>`, etc.).
-2. **Aprendizaje BPE**: el tokenizador analiza el texto y aprende hasta 5 nuevos merges, actualizando su vocabulario.
+2. **Aprendizaje BPE**: el tokenizador analiza el texto y aprende nuevos merges, actualizando su vocabulario.
 3. **Tokenización**: el texto se convierte a IDs usando el vocabulario actualizado.
 4. **Forward pass**: se procesa cada token secuencialmente, guardando estados, salidas y logits.
 5. **Cálculo de pérdida**: cross-entropy entre logits y el siguiente token real.
@@ -73,7 +73,7 @@ Esta arquitectura **aprende patrones complejos** gracias a la retropropagación 
 - PHP 7.4 o superior.
 - Extensiones: `json`, `fileinfo` (opcional, para algunos entornos).
 - Permisos de escritura en la carpeta `all-models/`.
-- **Memoria recomendada**: al menos 256MB para entrenamiento (puede llegar a 512MB con lotes grandes).
+- **Memoria recomendada**: al menos 512MB para entrenamiento (puede llegar a 1024MB con lotes grandes).
 
 ## Instalación
 
@@ -98,26 +98,26 @@ Puedes entrenar el modelo con texto libre o con pares de preguntas/respuestas.
 #### Entrenamiento libre (pestaña "Entrenar")
 Pega cualquier texto (cuentos, documentación, conversaciones) y haz clic en **"Entrenar modelo"**. El modelo:
 - Normalizará los espacios alrededor de tokens especiales.
-- Aprenderá nuevos merges BPE (hasta 5 por entrenamiento).
+- Aprenderá nuevos merges BPE.
 - Procesará el texto completo aplicando BPTT.
 
 #### Entrenamiento con preguntas y respuestas (pestaña "QA")
-Recomendamos usar este formato para que el modelo aprenda diálogos. Escribe una **pregunta** y una **respuesta** y presiona **"Entrenar QA"**. Internamente se concatenan y se añade el token `<|EOS|>`.
+Recomendamos usar este formato para que el modelo aprenda diálogos. Escribe una **pregunta** y una **respuesta** y presiona **"Entrenar QA"**. Internamente se concatenan.
 
 **Formato preferido de entrenamiento** (aunque no es obligatorio, da mejores resultados):
 
 ```
 <|USER|>
 ¿Sabes PHP?
-<|ASSISTANT|>
+<|AI|>
 Sí, PHP es mi lenguaje nativo 💻
 <|USER|>
 Haz un loop
-<|ASSISTANT|>
+<|AI|>
 for($i=0;$i<10;$i++){ echo $i; }
 ```
 
-_Opcionalmente puedes poner `<|EOS|>` al final para que el modelo sepa detenerse solo_
+_`<|AI|>` se reemplazará por `<|ASSISTANT|>` internamente, opcionalmente puedes poner `<|EOS|>` al final para que el modelo sepa detenerse solo_
 
 Puedes incluir este texto directamente en la pestaña **"Entrenar"**.
 
@@ -193,36 +193,36 @@ La respuesta será algo como:
 El modelo se guarda en la carpeta `all-models/<nombre-del-modelo>/` con tres archivos:
 
 - `tokenizer.json` – Vocabulario BPE, merges y tokens especiales.
-- `embeddings.bin` – Vectores de embeddings (128d) en formato binario.
+- `embeddings.bin` – Vectores de embeddings en formato binario.
 - `rwkv.bin` – Pesos serializados de los bloques RWKV (wk, wv, wr, ww, w1, w2).
 
 ## Consejos para un mejor entrenamiento
 
-- Usa el formato con `<|USER|>` y `<|ASSISTANT|>` para diálogos.
+- Usa el formato con `<|USER|>` y `<|ASSISTANT|>` (o `<|AI|>`) para diálogos.
 - Puedes obligar a que aprenda a detenerse con `<|EOS|>`.
+- Si usas `<|DIV|>` en entrenamiento, dividirás por bloques, para no tener que darle a entrenar varias veces.
 - **Entrena con lotes grandes**: Esta versión procesa todo el texto de una vez, así que asegúrate de tener suficiente memoria.
 - Si el modelo no genera bien al principio, **repite el entrenamiento** varias veces sobre el mismo corpus. La retropropagación necesita múltiples épocas.
-- El tokenizador aprende hasta 5 merges por llamada a `train`. Para desarrollar un vocabulario más rico, entrena varias veces con textos variados.
-- Ajusta `$learningRate` en `LLM.php` (0.01 por defecto) si la pérdida no disminuye o si hay inestabilidad.
-- Experimenta con `$embedDim` y `$numLayers` (requiere reiniciar el modelo desde cero).
+- El tokenizador aprende hasta `MERGES_PER_TRAIN` (la constante) merges por llamada a `train`. Para desarrollar un vocabulario más rico, entrena varias veces con textos variados.
+- Ajusta `LR` en `LLM.php` (0.01 por defecto) si la pérdida no disminuye o si hay inestabilidad.
+- Experimenta con `EMB_DIM` y `LAYERS` (requiere reiniciar el modelo desde cero).
 
 ## Limitaciones
 
-- Modelo de tamaño moderado (embeddings 128d, 4 capas, ~500k parámetros). No esperes respuestas extremadamente coherentes en temas complejos sin suficiente entrenamiento.
-- El entrenamiento BPTT puede consumir mucha memoria (proporcional a `longitud del texto * embedDim * numLayers`). Para textos muy largos, considera dividirlos manualmente.
-- El tokenizador BPE aprende merges basados en frecuencia, pero el límite de 5 merges por entrenamiento es bajo para mantener la velocidad; puede necesitar múltiples pasadas.
+- Modelo de tamaño moderado (embeddings 128d, 4 capas, ~500k parámetros). No esperes respuestas extremadamente coherentes en temas complejos sin suficiente entrenamiento. Puedes modificar las constantes iniciales.
+- El entrenamiento BPTT puede consumir mucha memoria (proporcional a `longitud del texto * EMB_DIM * LAYERS`). Para textos muy largos, considera dividirlos manualmente.
+- El tokenizador BPE aprende merges basados en frecuencia, el límite es de `MERGES_PER_TRAIN` (la constante) merges por entrenamiento es bajo para mantener la velocidad; puede necesitar múltiples pasadas, o puedes aumentarlo si quieres.
 - El cálculo de gradientes es manual y puede tener inestabilidades numéricas en casos extremos (se incluyen protecciones como `1e-8` en divisiones).
 
 ## Solución de problemas
 
-- **Error "No se puede escribir en models/"** → Verifica permisos de la carpeta `all-models`.
+- **Error "No se puede escribir en all-models/"** → Verifica permisos de la carpeta `all-models`.
 - **El modelo no responde o da respuestas vacías** → Entrena con más ejemplos o revisa el formato de los mensajes.
 - **La interfaz muestra "El servidor devolvió HTML"** → Mira la pestaña **Debug** para ver el error real del servidor.
-- **Error de memoria** → Reduce el tamaño del texto de entrenamiento o disminuye `$embedDim` y `$numLayers`.
-- **Generación muy lenta** → Reduce `$maxTokens` o aumenta la memoria disponible.
+- **Error de memoria** → Reduce el tamaño del texto de entrenamiento o disminuye `EMB_DIM` y `LAYERS`.
 - **Tokens desconocidos (`<UNK>`)** → Entrena más para que el BPE aprenda los merges necesarios.
 
-## Historial de versiones
+## Historial de versiones importantes
 
 - **v0.1-alpha**: Modelo basado únicamente en PPM (estadístico).
 - **v0.2-alpha**: Introducción de embeddings y caché semántico híbrido.
@@ -230,7 +230,8 @@ El modelo se guarda en la carpeta `all-models/<nombre-del-modelo>/` con tres arc
 - **v0.4-beta**: Arquitectura RWKV completa con time mixing, channel mixing y estados recurrentes.
 - **v0.5-beta**: Arquitectura Echo State Network (ESN) con reservorio fijo.
 - **v0.6-beta**: RWKV con entrenamiento completo por retropropagación (BPTT) y optimizador Adam.
-- **v0.61-beta**: **Tokenización BPE automática** + RWKV con BPTT. **El tokenizador aprende merges del texto**, adaptándose al corpus de entrenamiento.
+- **v0.61-beta**: Tokenización BPE automática + RWKV con BPTT. El tokenizador aprende merges del texto, adaptándose al corpus de entrenamiento.
+- **v0.63-beta**: Tokenización BPE clásica completa.
 
 ---
 

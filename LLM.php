@@ -1,14 +1,17 @@
 <?php
+const EMB_DIM = 128;
+const LR = 0.01;
+const LAYERS = 4;
+const MERGES_PER_TRAIN = 10;
+
 class BPETokenizer {
     private array $vocab = [];
     private array $reverseVocab = [];
     private array $merges = [];
     private array $cache = [];
-    private string $spaceToken = '▁';
     private string $unkToken = '<UNK>';
     private array $specialTokens = ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
 
-    // Para búsqueda rápida de tokens por longitud
     private array $tokensByLength = [];
 
     public function __construct(array $vocab = [], array $merges = []) {
@@ -18,7 +21,6 @@ class BPETokenizer {
             $this->buildTokensByLength();
         }
         $this->merges = $merges;
-        $this->addToken($this->spaceToken);
         foreach ($this->specialTokens as $st) $this->addToken($st);
     }
 
@@ -47,7 +49,7 @@ class BPETokenizer {
     }
 
     private function preTokenize(string $text): array {
-        preg_match_all('/(<\|[^>]+\|>|<[^>]+>|\p{L}+|\p{N}+|\p{So}+|\p{P}+|\n)/u', $text, $matches);
+        preg_match_all('/(<\|[^>]+\|>|<[^>]+>|\p{L}+|\p{N}+|\p{So}+|\p{P}+|\s+|\n)/u', $text, $matches);
         return $matches[0];
     }
 
@@ -86,68 +88,65 @@ class BPETokenizer {
     public function learnFromText(string $text, int $maxMerges = 10): void {
         $segments = $this->preTokenize($text);
         $wordFreqs = [];
-        $first = true;
+        $currentWord = '';
         foreach ($segments as $seg) {
-            $isSpecial = in_array($seg, $this->specialTokens, true);
-            if (!$isSpecial && preg_match('/^\p{L}+$/u', $seg) && !$first) {
-                $word = $this->spaceToken . $seg;
-            } elseif (!$isSpecial && preg_match('/^\p{N}+$/u', $seg) && !$first) {
-                $word = $this->spaceToken . $seg;
+            if (preg_match('/^\s+$/', $seg)) {
+                if ($currentWord !== '') {
+                    $wordFreqs[$currentWord] = ($wordFreqs[$currentWord] ?? 0) + 1;
+                    $currentWord = '';
+                }
+            } elseif (in_array($seg, $this->specialTokens, true)) {
+                if ($currentWord !== '') {
+                    $wordFreqs[$currentWord] = ($wordFreqs[$currentWord] ?? 0) + 1;
+                    $currentWord = '';
+                }
+                $wordFreqs[$seg] = ($wordFreqs[$seg] ?? 0) + 1;
             } else {
-                $word = $seg;
+                $currentWord .= $seg;
             }
-            $wordFreqs[$word] = ($wordFreqs[$word] ?? 0) + 1;
-            $first = false;
         }
-
-        $totalWords = array_sum($wordFreqs);
-        $threshold = max(2, $totalWords * 0.01);
+        if ($currentWord !== '') {
+            $wordFreqs[$currentWord] = ($wordFreqs[$currentWord] ?? 0) + 1;
+        }
 
         foreach ($wordFreqs as $word => $freq) {
             if (in_array($word, $this->specialTokens, true)) continue;
-            $len = mb_strlen($word);
-            if ($len > 2 && $freq >= $threshold && !isset($this->reverseVocab[$word])) $this->addToken($word);
+            if (!isset($this->reverseVocab[$word])) $this->addToken($word);
         }
 
         $splits = [];
         foreach ($wordFreqs as $word => $freq) {
             if (in_array($word, $this->specialTokens, true)) {
                 $splits[$word] = [$this->reverseVocab[$word]];
-            } else {
-                // Si la palabra ya es un token completo, la representamos como tal
-                if (isset($this->reverseVocab[$word])) {
-                    $splits[$word] = [$this->reverseVocab[$word]];
-                } else {
-                    // Dividir en caracteres
-                    $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
-                    $ids = [];
-                    foreach ($chars as $ch) {
-                        if (!isset($this->reverseVocab[$ch])) $this->addToken($ch);
-                        $ids[] = $this->reverseVocab[$ch];
-                    }
-                    // Aplicar merges existentes (para mantener consistencia)
-                    foreach ($this->merges as [$a, $b]) {
-                        $newIds = [];
-                        $i = 0;
-                        while ($i < count($ids)) {
-                            if ($i < count($ids)-1 && $this->vocab[$ids[$i]] === $a && $this->vocab[$ids[$i+1]] === $b) {
-                                $mergedToken = $a . $b;
-                                if (!isset($this->reverseVocab[$mergedToken])) $this->addToken($mergedToken);
-                                $newIds[] = $this->reverseVocab[$mergedToken];
-                                $i += 2;
-                            } else {
-                                $newIds[] = $ids[$i];
-                                $i++;
-                            }
-                        }
-                        $ids = $newIds;
-                    }
-                    $splits[$word] = $ids;
-                }
+                continue;
             }
+
+            $chars = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
+            $ids = [];
+            foreach ($chars as $ch) {
+                if (!isset($this->reverseVocab[$ch])) $this->addToken($ch);
+                $ids[] = $this->reverseVocab[$ch];
+            }
+
+            foreach ($this->merges as [$a, $b]) {
+                $newIds = [];
+                $i = 0;
+                while ($i < count($ids)) {
+                    if ($i < count($ids)-1 && $this->vocab[$ids[$i]] === $a && $this->vocab[$ids[$i+1]] === $b) {
+                        $mergedToken = $a . $b;
+                        if (!isset($this->reverseVocab[$mergedToken])) $this->addToken($mergedToken);
+                        $newIds[] = $this->reverseVocab[$mergedToken];
+                        $i += 2;
+                    } else {
+                        $newIds[] = $ids[$i];
+                        $i++;
+                    }
+                }
+                $ids = $newIds;
+            }
+            $splits[$word] = $ids;
         }
 
-        // Aprender nuevos merges
         for ($m = 0; $m < $maxMerges; $m++) {
             $pairFreqs = [];
             foreach ($splits as $word => $ids) {
@@ -171,7 +170,6 @@ class BPETokenizer {
             $newId = $this->addToken($newToken);
             $this->merges[] = [$a, $b];
 
-            // Actualizar splits
             foreach ($splits as $word => &$ids) {
                 $newIds = [];
                 $i = 0;
@@ -198,29 +196,18 @@ class BPETokenizer {
 
         $segments = $this->preTokenize($text);
         $result = [];
-        $first = true;
 
         foreach ($segments as $seg) {
             if (in_array($seg, $this->specialTokens, true)) {
                 $result[] = $seg;
-                $first = false;
                 continue;
             }
 
             if (preg_match('/^\p{L}+$/u', $seg) || preg_match('/^\p{N}+$/u', $seg)) {
-                if (!$first) {
-                    $word = $this->spaceToken . $seg;
-                } else {
-                    $word = $seg;
-                }
-                $first = false;
-
-                $wordTokens = $this->tokenizeWordGreedy($word);
+                $wordTokens = $this->tokenizeWordGreedy($seg);
                 $result = array_merge($result, $wordTokens);
             } else {
-                $word = $seg;
-                $first = false;
-                $subTokens = $this->bpeSplit($word);
+                $subTokens = $this->bpeSplit($seg);
                 $result = array_merge($result, $subTokens);
             }
         }
@@ -269,17 +256,11 @@ class BPETokenizer {
     }
 
     public function detokenize(array $tokens): string {
-        return preg_replace('/\s+/', ' ', str_replace($this->spaceToken, ' ', implode('', $tokens)));
+        return implode('', $tokens);
     }
 
     public function save(string $path): void {
-        file_put_contents($path, json_encode([
-            'vocab' => $this->vocab,
-            'reverseVocab' => $this->reverseVocab,
-            'merges' => $this->merges,
-            'spaceToken' => $this->spaceToken,
-            'unkToken' => $this->unkToken,
-            'specialTokens' => $this->specialTokens
+        file_put_contents($path, json_encode(['vocab' => $this->vocab, 'reverseVocab' => $this->reverseVocab, 'merges' => $this->merges, 'unkToken' => $this->unkToken, 'specialTokens' => $this->specialTokens
         ], JSON_UNESCAPED_UNICODE));
     }
 
@@ -288,7 +269,6 @@ class BPETokenizer {
         $this->vocab = $data['vocab'];
         $this->reverseVocab = $data['reverseVocab'];
         $this->merges = $data['merges'];
-        $this->spaceToken = $data['spaceToken'] ?? '▁';
         $this->unkToken = $data['unkToken'] ?? '<UNK>';
         $this->specialTokens = $data['specialTokens'] ?? ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
         $this->buildTokensByLength();
@@ -377,7 +357,7 @@ class RWKVBlock {
         return $v;
     }
 
-    private function resetGradients(): void {
+    public function resetGradients(): void {
         $dim = $this->dim;
         $this->grad_wk = array_fill(0, $dim, array_fill(0, $dim, 0.0));
         $this->grad_wv = array_fill(0, $dim, array_fill(0, $dim, 0.0));
@@ -572,9 +552,9 @@ class LLM {
     private array $specialTokens = ['<|SYSTEM|>', '<|USER|>', '<|ASSISTANT|>', '<|EOS|>'];
 
     private array $embeddings = [];
-    private int $embedDim = 128;
-    private float $learningRate = 0.01;
-    private int $numLayers = 4;
+    private int $embedDim = EMB_DIM;
+    private float $learningRate = LR;
+    private int $numLayers = LAYERS;
     private array $rwkvBlocks = [];
     private array $optimizers;
 
@@ -725,120 +705,121 @@ class LLM {
     }
 
     public function train(string $text): void {
-        $text = preg_replace('/\s*(<\|[^|]+\|>)\s*/', '$1', $text);
+        $text = preg_replace('/\s*(<\|[^|]+\|>)\s*/', '$1', str_replace('<|AI|>', '<|ASSISTANT|>', $text));
 
-        $this->tokenizer->learnFromText($text, 5);
+        $parts = array_filter(preg_split('/<\|DIV\|>/', $text), fn($p) => trim($p) !== '');
 
-        // Asegurar que los embeddings cubren todo el vocabulario
+        if (empty($parts)) $parts = [$text];
+
+        $fullText = implode(' ', $parts);
+        $this->tokenizer->learnFromText($fullText, MERGES_PER_TRAIN);
+
         $this->ensureEmbeddingsSize();
 
-        // Tokenizar con el vocabulario actualizado
-        $tokens = $this->tokenizer->tokenize($text, false);
-        $ids = $this->tokenizer->encode($tokens);
-        $len = count($ids);
-        if ($len < 2) return;
+        foreach ($this->rwkvBlocks as $block) $block->resetGradients();
 
-        $states = [];
-        $outputs = [];
-        $inputs = [];
-        $logits_list = [];
+        foreach ($parts as $part) {
+            if (trim($part) === '') continue;
 
-        $current_states = array_fill(0, $this->numLayers, ['num' => array_fill(0, $this->embedDim, 0.0), 'den' => array_fill(0, $this->embedDim, 0.0)]);
+            $tokens = $this->tokenizer->tokenize($part, false);
+            $ids = $this->tokenizer->encode($tokens);
+            $len = count($ids);
+            if ($len < 2) continue;
 
-        for ($pos = 0; $pos < $len - 1; $pos++) {
-            $x = $this->embeddings[$ids[$pos]] ?? array_fill(0, $this->embedDim, 0.0);
-            $inputs[] = $x;
+            $states = [];
+            $outputs = [];
+            $logits_list = [];
 
-            for ($l = 0; $l < $this->numLayers; $l++) $x = $this->rwkvBlocks[$l]->forward($x, $current_states[$l]);
-            $outputs[] = $x;
-            $states[$pos] = $current_states;
+            $current_states = array_fill(0, $this->numLayers, ['num' => array_fill(0, $this->embedDim, 0.0), 'den' => array_fill(0, $this->embedDim, 0.0)]);
 
-            $logits = [];
-            $norm_out = $this->normalizeVector($x);
-            foreach ($this->embeddings as $emb_id => $emb) {
-                $dot = 0.0;
-                for ($d = 0; $d < $this->embedDim; $d++) $dot += $norm_out[$d] * $emb[$d];
-                $logits[$emb_id] = $dot;
-            }
-            $logits_list[] = $logits;
-        }
+            // Forward pass
+            for ($pos = 0; $pos < $len - 1; $pos++) {
+                $x = $this->embeddings[$ids[$pos]] ?? array_fill(0, $this->embedDim, 0.0);
+                for ($l = 0; $l < $this->numLayers; $l++) $x = $this->rwkvBlocks[$l]->forward($x, $current_states[$l]);
+                $outputs[] = $x;
+                $states[$pos] = $current_states;
 
-        // Backward pass (BPTT)
-        $dstate_acum = [];
-        for ($l = 0; $l < $this->numLayers; $l++) {
-            for ($t = 0; $t < $len - 1; $t++) $dstate_acum[$l][$t] = ['num' => array_fill(0, $this->embedDim, 0.0), 'den' => array_fill(0, $this->embedDim, 0.0)];
-        }
-
-        for ($t = $len - 2; $t >= 0; $t--) {
-            $target = $ids[$t + 1];
-            $logits = $logits_list[$t];
-            $max = max($logits);
-            $sumExp = 0.0;
-            foreach ($logits as $l) $sumExp += exp($l - $max);
-            $softmax = [];
-            foreach ($logits as $id => $l) $softmax[$id] = exp($l - $max) / $sumExp;
-            $dlogits = [];
-            foreach ($softmax as $id => $p) $dlogits[$id] = $p - ($id == $target ? 1.0 : 0.0);
-
-            $dout = array_fill(0, $this->embedDim, 0.0);
-            foreach ($dlogits as $id => $dl) {
-                if (isset($this->embeddings[$id])) {
-                    $emb = $this->embeddings[$id];
-                    for ($d = 0; $d < $this->embedDim; $d++) $dout[$d] += $dl * $emb[$d];
+                $logits = [];
+                $norm_out = $this->normalizeVector($x);
+                foreach ($this->embeddings as $emb_id => $emb) {
+                    $dot = 0.0;
+                    for ($d = 0; $d < $this->embedDim; $d++) $dot += $norm_out[$d] * $emb[$d];
+                    $logits[$emb_id] = $dot;
                 }
+                $logits_list[] = $logits;
             }
 
-            $dy = $dout;
-            for ($l = $this->numLayers - 1; $l >= 0; $l--) {
-                $block = $this->rwkvBlocks[$l];
-                $res = $block->backward($dy);
-                $dx = $res['dx'];
-                $dnum_prev = $res['dnum_prev'];
-                $dden_prev = $res['dden_prev'];
+            // Backward pass (BPTT)
+            $dstate_acum = [];
+            for ($l = 0; $l < $this->numLayers; $l++) {
+                for ($t = 0; $t < $len - 1; $t++) $dstate_acum[$l][$t] = ['num' => array_fill(0, $this->embedDim, 0.0), 'den' => array_fill(0, $this->embedDim, 0.0)];
+            }
 
-                if ($t > 0) {
-                    for ($i = 0; $i < $this->embedDim; $i++) {
-                        $dstate_acum[$l][$t-1]['num'][$i] += $dnum_prev[$i];
-                        $dstate_acum[$l][$t-1]['den'][$i] += $dden_prev[$i];
+            for ($t = $len - 2; $t >= 0; $t--) {
+                $target = $ids[$t + 1];
+                $logits = $logits_list[$t];
+                $max = max($logits);
+                $sumExp = 0.0;
+                foreach ($logits as $l) $sumExp += exp($l - $max);
+                $softmax = [];
+                foreach ($logits as $id => $l) $softmax[$id] = exp($l - $max) / $sumExp;
+                $dlogits = [];
+                foreach ($softmax as $id => $p) $dlogits[$id] = $p - ($id == $target ? 1.0 : 0.0);
+
+                $dout = array_fill(0, $this->embedDim, 0.0);
+                foreach ($dlogits as $id => $dl) {
+                    if (isset($this->embeddings[$id])) {
+                        $emb = $this->embeddings[$id];
+                        for ($d = 0; $d < $this->embedDim; $d++) $dout[$d] += $dl * $emb[$d];
                     }
                 }
-                $dy = $dx;
-            }
 
-            $input_id = $ids[$t];
-            if (isset($this->embeddings[$input_id])) {
-                for ($d = 0; $d < $this->embedDim; $d++) $this->embeddings[$input_id][$d] -= $this->learningRate * $dy[$d];
-                $this->embeddings[$input_id] = $this->normalizeVector($this->embeddings[$input_id]);
-            }
+                $dy = $dout;
+                for ($l = $this->numLayers - 1; $l >= 0; $l--) {
+                    $block = $this->rwkvBlocks[$l];
+                    $res = $block->backward($dy);
+                    $dx = $res['dx'];
+                    $dnum_prev = $res['dnum_prev'];
+                    $dden_prev = $res['dden_prev'];
 
-            foreach ($dlogits as $id => $dl) {
-                if ($dl != 0 && isset($this->embeddings[$id])) {
-                    $factor = -$this->learningRate * $dl;
-                    $out_norm = $this->normalizeVector($outputs[$t]);
-                    for ($d = 0; $d < $this->embedDim; $d++) $this->embeddings[$id][$d] += $factor * $out_norm[$d];
-                    $this->embeddings[$id] = $this->normalizeVector($this->embeddings[$id]);
+                    if ($t > 0) {
+                        for ($i = 0; $i < $this->embedDim; $i++) {
+                            $dstate_acum[$l][$t-1]['num'][$i] += $dnum_prev[$i];
+                            $dstate_acum[$l][$t-1]['den'][$i] += $dden_prev[$i];
+                        }
+                    }
+                    $dy = $dx;
+                }
+
+                // Actualizar embedding de entrada
+                $input_id = $ids[$t];
+                if (isset($this->embeddings[$input_id])) {
+                    for ($d = 0; $d < $this->embedDim; $d++) $this->embeddings[$input_id][$d] -= $this->learningRate * $dy[$d];
+                    $this->embeddings[$input_id] = $this->normalizeVector($this->embeddings[$input_id]);
+                }
+
+                // Actualizar embeddings de salida (logits)
+                foreach ($dlogits as $id => $dl) {
+                    if ($dl != 0 && isset($this->embeddings[$id])) {
+                        $factor = -$this->learningRate * $dl;
+                        $out_norm = $this->normalizeVector($outputs[$t]);
+                        for ($d = 0; $d < $this->embedDim; $d++) $this->embeddings[$id][$d] += $factor * $out_norm[$d];
+                        $this->embeddings[$id] = $this->normalizeVector($this->embeddings[$id]);
+                    }
                 }
             }
         }
 
+        // Aplicar gradientes acumulados
         for ($l = 0; $l < $this->numLayers; $l++) $this->rwkvBlocks[$l]->applyGradients($this->optimizers["block_$l"], $this->learningRate);
 
+        // Guardar modelo
         $this->tokenizer->save($this->modelDir . '/tokenizer.json');
         $this->saveEmbeddings($this->modelDir . '/embeddings.bin');
         $this->saveRWKV($this->modelDir . '/rwkv.bin');
     }
 
-    public function generate(
-        string $prompt,
-        int $maxTokens = 50,
-        float $temperature = 0.8,
-        ?int $topK = null,
-        float $frequencyPenalty = 0.0,
-        array $stopTokens = [],
-        ?float $topP = null,
-        float $repetitionPenalty = 1.0,
-        float $presencePenalty = 0.0
-    ): string {
+    public function generate(string $prompt, int $maxTokens = 50, float $temperature = 0.8, ?int $topK = null, float $frequencyPenalty = 0.0, array $stopTokens = [], ?float $topP = null, float $repetitionPenalty = 1.0, float $presencePenalty = 0.0): string {
         if (!str_contains($prompt, '<|')) $prompt = "<|USER|>".trim($prompt)."<|ASSISTANT|>";
         $prompt = preg_replace('/\s*(<\|[^|]+\|>)\s*/', '$1', $prompt);
         $allStopTokens = array_merge($stopTokens, ['<|EOS|>']);
@@ -898,10 +879,7 @@ class LLM {
             }
 
             if ($frequencyPenalty > 0) {
-                foreach ($probs as $id => $p) {
-                    $count = $freqCount[$id] ?? 0;
-                    $probs[$id] = $p / (1 + $frequencyPenalty * $count);
-                }
+                foreach ($probs as $id => $p) $probs[$id] = $p / (1 + $frequencyPenalty * $freqCount[$id] ?? 0);
                 $sum = array_sum($probs);
                 foreach ($probs as $id => $p) $probs[$id] = $p / $sum;
             }
@@ -946,7 +924,6 @@ class LLM {
             $lastOutput = $x;
         }
 
-        // Decodificar y limpiar cualquier token especial residual
         $filteredTokens = array_filter($this->tokenizer->decode($generatedIds), fn($t) => !in_array($t, $this->specialTokens, true));
         return trim($this->tokenizer->detokenize($filteredTokens));
     }

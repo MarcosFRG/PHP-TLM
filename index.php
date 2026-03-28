@@ -2,7 +2,7 @@
 require_once 'LLM.php';
 session_start();
 if(!file_exists('all-models')) mkdir('all-models');
-$modelDir = 'all-models/'.$_SESSION['model']??'tiny-php';
+$modelDir = 'all-models/'.($_SESSION['model']??'tiny-php');
 $maxContext = 512;
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 if(!isset($_SESSION['chat_history'])) $_SESSION['chat_history'] = [];
@@ -240,6 +240,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
             font-size: 1rem;
             transition: border 0.15s ease, box-shadow 0.15s ease;
             background: #fafdff;
+            resize:vertical;
         }
         textarea:focus, input:focus, select:focus {
             outline: none;
@@ -392,7 +393,6 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
             border: 1px solid #e2e8f0;
         }
 
-        /* Parámetros (sliders + números) */
         .params-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -561,17 +561,15 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
             <button class="warning" id="clear-history-btn">🗑️ Borrar historial</button>
         </div>
         <div id="chat-area">
-            <?php if (!empty($_SESSION['chat_history'])): ?>
-                <?php foreach ($_SESSION['chat_history'] as $msg): ?>
+            <?php if (!empty($_SESSION['chat_history'])){ ?>
+                <?php foreach ($_SESSION['chat_history'] as $msg){ ?>
                     <div class="chat-message user-message"><?php echo htmlspecialchars($msg['user']); ?></div>
                     <div class="chat-message bot-message">
                         <?php echo htmlspecialchars($msg['bot']); ?>
                         <div class="timestamp"><?php echo $msg['timestamp']; ?></div>
                     </div>
-                <?php endforeach; ?>
-            <?php else: ?>
-                <div class="chat-message bot-message">🤖 Modelo listo. Escribe algo…</div>
-            <?php endif; ?>
+                <?php } ?>
+            <?php } ?>
         </div>
         <div class="chat-input">
             <input type="text" id="chat-input" placeholder="Mensaje…" autocomplete="off">
@@ -787,7 +785,7 @@ if($_SERVER['REQUEST_METHOD'] == 'POST'){
         try {
             const res = await fetch('', { method: 'POST', body: formData });
             const data = await res.json();
-            if (data.success) location.reload(); else alert('Error: ' + data.message);
+            if (data.success) document.getElementById('chat-area').innerHTML = ''; else alert('Error: ' + data.message);
         } catch (err) { alert('Error de conexión'); }
     });
 
